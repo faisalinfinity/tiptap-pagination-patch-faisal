@@ -10,7 +10,7 @@ import { isBodyNode } from "../utils/nodes/body/body";
 import { parseHTMLNode } from "../utils/nodes/node";
 import { calculateShorthandMargins, calculateBodyMargins } from "../utils/nodes/body/attributes/pageMargins";
 import { mm } from "../utils/units";
-import { calculateBodyDimensions } from "../utils/pageRegion/dimensions";
+// import { calculateBodyDimensions } from "../utils/pageRegion/dimensions";
 import { constructChildOnlyClipboardPlugin } from "../utils/clipboard";
 import { addNodeAttributes } from "../utils/attributes/addAttributes";
 import { getPageNodeAndPosition } from "../utils/nodes/page/pagePosition";
@@ -51,11 +51,11 @@ export const BodyNode = Node.create({
             dom.setAttribute(bodyAttribute, String(true));
             dom.classList.add(BODY_NODE_NAME);
 
-            const { width, height } = calculateBodyDimensions(pageNode, node);
+            // const { width} = calculateBodyDimensions(pageNode, node);
             const calculatedMargins = calculateBodyMargins(node);
 
-            dom.style.height = mm(height);
-            dom.style.width = mm(width);
+            dom.style.height = mm(1000);
+            dom.style.width = mm(215.9);
             dom.style.margin = calculateShorthandMargins(calculatedMargins);
 
             dom.style.border = "1px solid #ccc";

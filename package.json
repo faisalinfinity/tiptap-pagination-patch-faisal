@@ -1,8 +1,8 @@
 {
-    "name": "@kunalukey/tiptap-pagination-patch",
-    "version": "2.1.9",
+    "name": "@mujtabafaisal944.fk/tiptap-pagination-patch",
+    "version": "1.0.7",
     "description": "Patch for Tiptap Pagination Extension",
-    "author": "Kunal Ukey <kunalukey32@gmail.com> (https://www.github.com/helloukey)",
+    "author": "Faisal Mujtaba <mujtabafaisal944.fk@gmail.com> (https://www.github.com/faisalinfinity)",
     "keywords": [
         "tiptap",
         "pagination",
@@ -12,9 +12,9 @@
     "license": "ISC",
     "repository": {
         "type": "git",
-        "url": "git+https://github.com/helloukey/tiptap-pagination-patch.git"
+        "url": "git+https://github.com/faisalinfinity/tiptap-pagination-patch.git"
     },
-    "homepage": "https://github.com/helloukey/tiptap-pagination-patch",
+    "homepage": "https://github.com/faisalinfinity/tiptap-pagination-patch",
     "type": "module",
     "main": "dist/index.js",
     "module": "dist/index.js",
@@ -222,6 +222,6 @@
         "yallist": "^3.1.1"
     },
     "bugs": {
-        "url": "https://github.com/helloukey/tiptap-pagination-patch/issues"
+        "url": "https://github.com/faisalinfinity/tiptap-pagination-patch/issues"
     }
 }

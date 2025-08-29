@@ -8,7 +8,7 @@ import { Node, NodeViewRendererProps, mergeAttributes } from "@tiptap/core";
 import { DEFAULT_PAGE_BORDER_CONFIG } from "../constants/pageBorders";
 import { DEFAULT_PAPER_COLOUR } from "../constants/paperColours";
 import { PAGE_NODE_NAME, DEFAULT_PAGE_GAP, PAGE_ATTRIBUTES } from "../constants/page";
-import { getPaperDimensionsFromPageNode } from "../utils/nodes/page/attributes/paperSize";
+// import { getPaperDimensionsFromPageNode } from "../utils/nodes/page/attributes/paperSize";
 import { getPageNodePaperColour } from "../utils/nodes/page/attributes/paperColour";
 import { isPageNode } from "../utils/nodes/page/page";
 import { mm, px } from "../utils/units";
@@ -56,9 +56,9 @@ export const PageNode = Node.create<PageNodeOptions>({
             dom.setAttribute(dataPageAttribute, String(true));
             dom.classList.add(PAGE_NODE_NAME);
 
-            const { width, height } = getPaperDimensionsFromPageNode(node);
-            dom.style.width = mm(width);
-            dom.style.height = mm(height);
+            // const { width } = getPaperDimensionsFromPageNode(node);
+            dom.style.width = mm(215.9);
+            dom.style.height = mm(1000);
 
             const pageBorders = getPageNodePageBorders(node) ?? DEFAULT_PAGE_BORDER_CONFIG;
             dom.style.borderWidth = calculateShorthandPageBorders(pageBorders);
