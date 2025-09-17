@@ -54,7 +54,7 @@ export const BodyNode = Node.create({
             // const { width} = calculateBodyDimensions(pageNode, node);
             const calculatedMargins = calculateBodyMargins(node);
 
-            dom.style.height = mm(1000);
+            dom.style.height = mm(302.11);
             dom.style.width = mm(215.9);
             dom.style.margin = calculateShorthandMargins(calculatedMargins);
 

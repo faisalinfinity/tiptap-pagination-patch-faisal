@@ -58,7 +58,7 @@ export const PageNode = Node.create<PageNodeOptions>({
 
             // const { width } = getPaperDimensionsFromPageNode(node);
             dom.style.width = mm(215.9);
-            dom.style.height = mm(1000);
+            dom.style.height = mm(302.11);
 
             const pageBorders = getPageNodePageBorders(node) ?? DEFAULT_PAGE_BORDER_CONFIG;
             dom.style.borderWidth = calculateShorthandPageBorders(pageBorders);
