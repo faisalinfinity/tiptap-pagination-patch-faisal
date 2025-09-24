@@ -16,6 +16,7 @@ import { calculateShorthandPageBorders, getPageNodePageBorders } from "../utils/
 import { constructChildOnlyClipboardPlugin } from "../utils/clipboard";
 import { parseHTMLNode } from "../utils/nodes/node";
 import { addNodeAttributes } from "../utils/attributes/addAttributes";
+import { getPaperDimensionsFromPageNode } from "../utils/nodes/page/attributes/paperSize";
 
 const baseElement = "div" as const;
 const dataPageAttribute = "data-page" as const;
@@ -56,9 +57,9 @@ export const PageNode = Node.create<PageNodeOptions>({
             dom.setAttribute(dataPageAttribute, String(true));
             dom.classList.add(PAGE_NODE_NAME);
 
-            // const { width } = getPaperDimensionsFromPageNode(node);
-            dom.style.width = mm(215.9);
-            dom.style.height = mm(302.11);
+            const { width, height } = getPaperDimensionsFromPageNode(node);
+            dom.style.width = mm(width);
+            dom.style.height = mm(height);
 
             const pageBorders = getPageNodePageBorders(node) ?? DEFAULT_PAGE_BORDER_CONFIG;
             dom.style.borderWidth = calculateShorthandPageBorders(pageBorders);

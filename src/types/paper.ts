@@ -25,7 +25,7 @@ export type APaperSize =
     | "4A0"
     | "A0+"
     | "A1+"
-    | "A3+";
+    | "A3+" | "US";
 
 export type BPaperSize =
     | "B0"

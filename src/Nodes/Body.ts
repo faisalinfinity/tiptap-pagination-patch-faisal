@@ -14,6 +14,7 @@ import { mm } from "../utils/units";
 import { constructChildOnlyClipboardPlugin } from "../utils/clipboard";
 import { addNodeAttributes } from "../utils/attributes/addAttributes";
 import { getPageNodeAndPosition } from "../utils/nodes/page/pagePosition";
+import { calculateBodyDimensions } from "../utils/pageRegion/dimensions";
 
 const baseElement = "div" as const;
 const bodyAttribute = "data-page-body" as const;
@@ -51,11 +52,11 @@ export const BodyNode = Node.create({
             dom.setAttribute(bodyAttribute, String(true));
             dom.classList.add(BODY_NODE_NAME);
 
-            // const { width} = calculateBodyDimensions(pageNode, node);
+            const { width,height} = calculateBodyDimensions(pageNode, node);
             const calculatedMargins = calculateBodyMargins(node);
 
-            dom.style.height = mm(302.11);
-            dom.style.width = mm(215.9);
+            dom.style.height = mm(height);
+            dom.style.width = mm(width);
             dom.style.margin = calculateShorthandMargins(calculatedMargins);
 
             dom.style.border = "1px solid #ccc";

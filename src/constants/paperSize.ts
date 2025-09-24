@@ -28,6 +28,7 @@ const aPaperSizes: Record<APaperSize, PaperDimensions> = {
     "A0+": { width: 914, height: 1292 },
     "A1+": { width: 609, height: 914 },
     "A3+": { width: 329, height: 483 },
+    US: { width: 215.9, height: 279.4 },
 };
 
 const bPaperSizes: Record<BPaperSize, PaperDimensions> = {
