@@ -181,6 +181,16 @@ const PaginationPlugin = ({ editor, options }: PaginationPluginProps) =>
                     // Must have page node in schema
                     if (!schema.nodes.page) return;
 
+                    // 👇 Check if forcePagination meta was set
+                    const lastTr = state.tr;
+                    const force = lastTr.getMeta("forcePagination");
+
+                    if (force === true) {
+                        st.pendingFrom = 0;
+                        st.pendingTo = prevState.doc.content.size;
+                        schedulePagination(v, runPagination);
+                        return;
+                    }
                     // Skip if document didn't change (selection-only updates)
                     const changed = docReallyChanged(prevState, state);
                     const initialLoad = isNodeEmpty(prevState.doc) && !isNodeEmpty(doc);

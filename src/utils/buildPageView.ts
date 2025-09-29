@@ -518,4 +518,5 @@ const paginationUpdateCursorPosition = (tr: Transaction, newCursorPos: Nullable<
   } else {
     setSelectionAtEndOfDocument(tr);
   }
-};
+};       
+
