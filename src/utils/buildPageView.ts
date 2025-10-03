@@ -1,7 +1,7 @@
 /**
  * @file /src/utils/buildPageView.ts
  * @name BuildPageView
- * @description Utility functions for building the page view with Final Draft-compliant widow/orphan control.
+ * @description Utility functions for building the page view with Final Draft-compliant widow/orphan control and smart content splitting.
  */
 
 import { Node as PMNode, ResolvedPos } from "@tiptap/pm/model";
@@ -41,7 +41,26 @@ interface ContentGroup {
   totalHeight: number;
   mustStayTogether: boolean;
   groupType: string | null;
+  allowDialogueSplit?: boolean; // New flag for dialogue splitting
 }
+
+/**
+ * Split result for a node that needs to be split across pages
+ */
+interface SplitResult {
+  firstPart: PMNode;
+  secondPart: PMNode;
+  firstPartHeight: number;
+  secondPartHeight: number;
+  splitItemIndex: number; // Index of the item that was split within the group
+}
+
+/**
+ * Constants for Final Draft-compliant pagination
+ */
+const MIN_LINES_ON_PAGE = 2;
+const MIN_LINES_AFTER_SPLIT = 2;
+const ESTIMATED_LINE_HEIGHT = MIN_PARAGRAPH_HEIGHT;
 
 /**
  * Builds a new document with paginated content.
@@ -62,7 +81,7 @@ export const buildPageView = (editor: Editor, view: EditorView, options: Paginat
     const { tr, selection } = state;
     const oldCursorPos = selection.from;
 
-    const { newDoc, oldToNewPosMap } = buildNewDocument(editor, options, contentNodes, nodeHeights);
+    const { newDoc, oldToNewPosMap } = buildNewDocument(editor, view, options, contentNodes, nodeHeights);
 
     // Compare the content of the documents
     if (!newDoc.content.eq(doc.content)) {
@@ -93,16 +112,12 @@ const collectContentNodes = (doc: PMNode): NodePosArray => {
   doc.forEach((pageNode, pageOffset) => {
     if (isPageNode(pageNode)) {
       pageNode.forEach((pageRegionNode, pageRegionOffset) => {
-        // Offsets in forEach loop start from 0, however, the child nodes of any given node
-        // have a starting offset of 1 (for the first child)
         const truePageRegionOffset = pageRegionOffset + 1;
 
         if (isHeaderFooterNode(pageRegionNode)) {
           // Don't collect header/footer nodes
         } else if (isBodyNode(pageRegionNode)) {
           pageRegionNode.forEach((child, childOffset) => {
-            // First child of body node (e.g. paragraph) has an offset of 1 more
-            // than the body node itself.
             const trueChildOffset = childOffset + 1;
             contentNodes.push({
               node: child,
@@ -159,16 +174,14 @@ const measureNodeHeights = (view: EditorView, contentNodes: NodePosArray): numbe
 
       if (height === 0) {
         if (node.type === paragraphType || node.isTextblock) {
-          // Assign a minimum height to empty paragraphs or textblocks
           height = MIN_PARAGRAPH_HEIGHT;
         }
       }
 
-      // We use top margin only because there is overlap of margins between paragraphs
       return height + marginTop;
     }
 
-    return MIN_PARAGRAPH_HEIGHT; // Default to minimum height if DOM element is not found
+    return MIN_PARAGRAPH_HEIGHT;
   });
 
   return nodeHeights;
@@ -179,6 +192,213 @@ const measureNodeHeights = (view: EditorView, contentNodes: NodePosArray): numbe
  */
 const getNodeClass = (node: PMNode): string | null => {
   return node.attrs?.class || null;
+};
+
+/**
+ * Extract text content from a node
+ */
+const extractTextContent = (node: PMNode): string => {
+  let text = "";
+  node.descendants((child) => {
+    if (child.isText) {
+      text += child.text;
+    }
+  });
+  return text;
+};
+
+/**
+ * Split text content at sentence boundaries (periods)
+ * Returns array of sentences with their periods included
+ */
+const splitIntoSentences = (text: string): string[] => {
+  if (!text || !text.trim()) return [];
+  
+  // Split by periods followed by space, newline, or end of string, keeping the period
+  const sentences: string[] = [];
+  const parts = text.split(/(\.[^\w]|\.$)/);
+  
+  let currentSentence = "";
+  for (let i = 0; i < parts.length; i++) {
+    const part = parts[i];
+    if (part.match(/\.[^\w]/) || part === ".") {
+      currentSentence += part;
+      if (currentSentence.trim()) {
+        sentences.push(currentSentence.trim());
+      }
+      currentSentence = "";
+    } else {
+      currentSentence += part;
+    }
+  }
+  
+  // Add any remaining text
+  if (currentSentence.trim()) {
+    sentences.push(currentSentence.trim());
+  }
+
+  return sentences.filter(s => s.length > 0);
+};
+
+/**
+ * Estimate height of text content based on character count
+ */
+const estimateTextHeight = (text: string, nodeHeight: number, originalText: string): number => {
+  if (originalText.length === 0) return MIN_PARAGRAPH_HEIGHT;
+  const ratio = text.length / originalText.length;
+  return Math.max(nodeHeight * ratio, MIN_PARAGRAPH_HEIGHT);
+};
+
+/**
+ * Check if a node can be split (dialogue or action)
+ */
+const isSplittableNode = (node: PMNode): boolean => {
+  const nodeClass = getNodeClass(node);
+  return nodeClass === "dialogue" || nodeClass === "action" || !nodeClass;
+};
+
+/**
+ * Try to split a node at sentence boundaries
+ * Returns null if splitting is not possible or advisable
+ */
+const trySplitNode = (
+  node: PMNode,
+  nodeHeight: number,
+  availableHeight: number,
+  view: EditorView
+): SplitResult | null => {
+  if (!isSplittableNode(node)) {
+    return null;
+  }
+
+  const text = extractTextContent(node);
+  if (!text.trim()) {
+    return null;
+  }
+
+  const sentences = splitIntoSentences(text);
+  if (sentences.length < 2) {
+    // Can't split if there's only one sentence
+    return null;
+  }
+
+  // Calculate minimum heights for widow/orphan prevention
+  const minHeightForFirstPart = MIN_LINES_AFTER_SPLIT * ESTIMATED_LINE_HEIGHT;
+  const minHeightForSecondPart = MIN_LINES_AFTER_SPLIT * ESTIMATED_LINE_HEIGHT;
+
+  // Try to find the best split point
+  let bestSplitIndex = -1;
+  let firstPartText = "";
+
+  for (let i = 0; i < sentences.length - 1; i++) {
+    firstPartText += (i > 0 ? " " : "") + sentences[i];
+    const estimatedHeight = estimateTextHeight(firstPartText, nodeHeight, text);
+    
+    // Check if this split would work
+    const secondPartText = sentences.slice(i + 1).join(" ");
+    const secondPartHeight = estimateTextHeight(secondPartText, nodeHeight, text);
+
+    if (
+      estimatedHeight >= minHeightForFirstPart &&
+      estimatedHeight <= availableHeight &&
+      secondPartHeight >= minHeightForSecondPart
+    ) {
+      bestSplitIndex = i;
+    } else if (estimatedHeight > availableHeight && bestSplitIndex >= 0) {
+      // We've gone too far, use the previous split
+      break;
+    }
+  }
+
+  if (bestSplitIndex < 0) {
+    return null;
+  }
+
+  // Create the split text
+  firstPartText = sentences.slice(0, bestSplitIndex + 1).join(" ");
+  const secondPartText = sentences.slice(bestSplitIndex + 1).join(" ");
+
+  const nodeClass = getNodeClass(node);
+  const schema = view.state.schema;
+
+  // Create new nodes with split content
+  const firstPartNode = createNodeWithText(node, firstPartText.trim(), schema, nodeClass, false);
+  const secondPartNode = createNodeWithText(node, secondPartText.trim(), schema, nodeClass, true);
+
+  const firstPartHeight = estimateTextHeight(firstPartText, nodeHeight, text);
+  const secondPartHeight = estimateTextHeight(secondPartText, nodeHeight, text);
+
+  return {
+    firstPart: firstPartNode,
+    secondPart: secondPartNode,
+    firstPartHeight,
+    secondPartHeight,
+    splitItemIndex: 0 // For single node splits
+  };
+};
+
+/**
+ * Create a node with text content, preserving node type and attributes
+ */
+const createNodeWithText = (
+  originalNode: PMNode,
+  text: string,
+  schema: any,
+  nodeClass: string | null,
+  isContinuation: boolean
+): PMNode => {
+  // Add continuation marker for dialogue if needed
+  let finalText = text;
+  if (isContinuation && nodeClass === "dialogue") {
+    // Keep text as-is for dialogue continuation
+    finalText = text;
+  }
+
+  // Create text node
+  const textNode = schema.text(finalText);
+  
+  // Preserve original node attributes
+  const attrs = { ...originalNode.attrs };
+  
+  return originalNode.type.create(attrs, textNode);
+};
+
+/**
+ * Try to split a group that contains dialogue
+ */
+const tryGroupSplit = (
+  group: ContentGroup,
+  groupHeights: number[],
+  availableHeight: number,
+  view: EditorView
+): SplitResult | null => {
+  if (!group.allowDialogueSplit) {
+    return null;
+  }
+
+  // Find dialogue items in the group
+  for (let i = 0; i < group.items.length; i++) {
+    const item = group.items[i];
+    const nodeClass = getNodeClass(item.node);
+    
+    if (nodeClass === "dialogue" && isSplittableNode(item.node)) {
+      // Calculate height used by items before this dialogue
+      const heightBeforeDialogue = groupHeights.slice(0, i).reduce((sum, h) => sum + h, 0);
+      const remainingHeight = availableHeight - heightBeforeDialogue;
+      
+      if (remainingHeight > MIN_LINES_AFTER_SPLIT * ESTIMATED_LINE_HEIGHT) {
+        const splitResult = trySplitNode(item.node, groupHeights[i], remainingHeight, view);
+        if (splitResult) {
+          return {
+            ...splitResult,
+            splitItemIndex: i
+          };
+        }
+      }
+    }
+  }
+  
+  return null;
 };
 
 /**
@@ -221,7 +441,8 @@ const createContentGroups = (contentNodes: NodePosArray, nodeHeights: number[]):
         items: [curr],
         totalHeight: nodeHeights[i],
         mustStayTogether: true,
-        groupType: "character-dialogue"
+        groupType: "character-dialogue",
+        allowDialogueSplit: true // Allow dialogue within this group to be split
       };
       i++;
 
@@ -250,13 +471,14 @@ const createContentGroups = (contentNodes: NodePosArray, nodeHeights: number[]):
       
       groups.push(group);
     }
-    // Default: single node groups
+    // Default: single node groups (can be split if they're splittable)
     else {
       groups.push({
         items: [curr],
         totalHeight: nodeHeights[i],
         mustStayTogether: false,
-        groupType: currClass
+        groupType: currClass,
+        allowDialogueSplit: isSplittableNode(curr.node)
       });
       i++;
     }
@@ -269,6 +491,7 @@ const createContentGroups = (contentNodes: NodePosArray, nodeHeights: number[]):
  * Build the new document and keep track of new positions.
  *
  * @param editor - The editor instance.
+ * @param view - The editor view.
  * @param options - The pagination options.
  * @param contentNodes - The content nodes and their positions.
  * @param nodeHeights - The heights of the content nodes.
@@ -276,6 +499,7 @@ const createContentGroups = (contentNodes: NodePosArray, nodeHeights: number[]):
  */
 const buildNewDocument = (
   editor: Editor,
+  view: EditorView,
   options: PaginationOptions,
   contentNodes: NodePosArray,
   nodeHeights: number[]
@@ -346,33 +570,80 @@ const buildNewDocument = (
     const remainingHeight = bodyPixelDimensions.bodyHeight - currentHeight;
     const groupFits = group.totalHeight <= remainingHeight;
     
-    // Determine if we need a page break
+    // Determine if we need a page break or can split
     let needPageBreak = false;
+    let splitResult: SplitResult | null = null;
     
-    if (!groupFits && currentPageContent.length > 0) {
+    // Check if we should try to split the group
+    if (!groupFits && group.allowDialogueSplit) {
+      // Create height array for this group
+      const groupHeights: number[] = [];
+      let startIndex = -1;
+      
+      // Find the starting index of this group in the nodeHeights array
+      for (let nodeIndex = 0; nodeIndex < contentNodes.length; nodeIndex++) {
+        if (contentNodes[nodeIndex].pos === group.items[0].pos) {
+          startIndex = nodeIndex;
+          break;
+        }
+      }
+      
+      if (startIndex >= 0) {
+        for (let i = 0; i < group.items.length; i++) {
+          groupHeights.push(nodeHeights[startIndex + i]);
+        }
+        
+        splitResult = tryGroupSplit(group, groupHeights, remainingHeight, view);
+      }
+    }
+    
+    // If we can't split and don't fit, force page break
+    if (!groupFits && !splitResult && currentPageContent.length > 0) {
       needPageBreak = true;
     }
     
     // Special handling for scene headings - check if there's room for next content too
     if (group.groupType === "scene" && groupFits && nextGroup) {
-      // Need at least 2 lines of space after scene heading
-      const minSpaceNeeded = group.totalHeight + (MIN_PARAGRAPH_HEIGHT * 2);
+      const minSpaceNeeded = group.totalHeight + (MIN_PARAGRAPH_HEIGHT * MIN_LINES_ON_PAGE);
       if (minSpaceNeeded > remainingHeight && currentPageContent.length > 0) {
         needPageBreak = true;
       }
     }
     
     // Special handling for character/dialogue - ensure minimum dialogue space
-    if (group.groupType === "character-dialogue" && groupFits) {
-      // If character name fits but not enough room for meaningful dialogue
+    if (group.groupType === "character-dialogue" && groupFits && !splitResult) {
       const minDialogueSpace = group.totalHeight + MIN_PARAGRAPH_HEIGHT;
       if (minDialogueSpace > remainingHeight && currentPageContent.length > 0) {
         needPageBreak = true;
       }
     }
     
-    // Handle groups that must stay together
-    if (group.mustStayTogether && !groupFits && currentPageContent.length > 0) {
+    // Handle groups that must stay together (but may have splittable dialogue)
+    if (group.mustStayTogether && !groupFits && !splitResult && currentPageContent.length > 0) {
+      needPageBreak = true;
+    }
+    
+    // Process split result if we have one
+    if (splitResult) {
+      // Add items before the split dialogue to current page
+      for (let i = 0; i < splitResult.splitItemIndex; i++) {
+        const item = group.items[i];
+        const offsetInPage = currentPageContent.reduce((sum, n) => sum + n.nodeSize, 0);
+        const nodeStartPosInNewDoc = cumulativeNewDocPos + offsetInPage;
+        
+        oldToNewPosMap.set(item.pos, nodeStartPosInNewDoc);
+        currentPageContent.push(item.node);
+      }
+      
+      // Add first part of split dialogue to current page
+      const splitItem = group.items[splitResult.splitItemIndex];
+      const offsetInPage = currentPageContent.reduce((sum, n) => sum + n.nodeSize, 0);
+      const nodeStartPosInNewDoc = cumulativeNewDocPos + offsetInPage;
+      
+      oldToNewPosMap.set(splitItem.pos, nodeStartPosInNewDoc);
+      currentPageContent.push(splitResult.firstPart);
+      
+      // Force page break
       needPageBreak = true;
     }
     
@@ -390,19 +661,45 @@ const buildNewDocument = (
       
       currentPageHeader = constructHeader(pageRegionNodeAttributes.header);
       cumulativeNewDocPos += getMaybeNodeSize(currentPageHeader);
-    }
-    
-    // Add all items in the group to current page
-    for (const item of group.items) {
-      const { node, pos: oldPos } = item;
-      const offsetInPage = currentPageContent.reduce((sum, n) => sum + n.nodeSize, 0);
-      const nodeStartPosInNewDoc = cumulativeNewDocPos + offsetInPage;
       
-      oldToNewPosMap.set(oldPos, nodeStartPosInNewDoc);
-      currentPageContent.push(node);
+      // Add continuation content if we have a split
+      if (splitResult) {
+        // Add second part of split dialogue to new page
+        // const offsetInPage = currentPageContent.reduce((sum, n) => sum + n.nodeSize, 0);
+        // const nodeStartPosInNewDoc = cumulativeNewDocPos + offsetInPage;
+        
+        currentPageContent.push(splitResult.secondPart);
+        currentHeight += splitResult.secondPartHeight;
+        
+        // Add remaining items after the split dialogue
+        for (let i = splitResult.splitItemIndex + 1; i < group.items.length; i++) {
+          const item = group.items[i];
+          const offsetInPage = currentPageContent.reduce((sum, n) => sum + n.nodeSize, 0);
+          const nodeStartPosInNewDoc = cumulativeNewDocPos + offsetInPage;
+          
+          oldToNewPosMap.set(item.pos, nodeStartPosInNewDoc);
+          currentPageContent.push(item.node);
+        }
+        
+        // Clear split result and continue
+        splitResult = null;
+        continue;
+      }
     }
     
-    currentHeight += group.totalHeight;
+    // Add all items in the group to current page (if we didn't already handle via split)
+    if (!splitResult) {
+      for (const item of group.items) {
+        const { node, pos: oldPos } = item;
+        const offsetInPage = currentPageContent.reduce((sum, n) => sum + n.nodeSize, 0);
+        const nodeStartPosInNewDoc = cumulativeNewDocPos + offsetInPage;
+        
+        oldToNewPosMap.set(oldPos, nodeStartPosInNewDoc);
+        currentPageContent.push(node);
+      }
+      
+      currentHeight += group.totalHeight;
+    }
   }
 
   // Add any remaining content to the last page
@@ -458,8 +755,19 @@ const mapCursorPosition = (
       const newNodePos = oldToNewPosMap.get(oldNodePos);
 
       if (newNodePos === undefined) {
-        console.error("Unable to determine new node position from cursor map!");
-        newCursorPos = 0;
+        // Try to find closest mapped position
+        let closestPos = 0;
+        let minDistance = Infinity;
+        
+        oldToNewPosMap.forEach((newPos, oldPos) => {
+          const distance = Math.abs(oldPos - oldCursorPos);
+          if (distance < minDistance) {
+            minDistance = distance;
+            closestPos = newPos;
+          }
+        });
+        
+        newCursorPos = Math.min(closestPos, newDocContentSize - 1);
       } else {
         newCursorPos = Math.min(newNodePos + offsetInNode, newDocContentSize - 1);
       }
@@ -473,7 +781,6 @@ const mapCursorPosition = (
 /**
  * Check if the given position is at the start of a text block.
  *
- * @param doc - The document node.
  * @param $pos - The resolved position in the document.
  * @returns {boolean} True if the position is at the start of a text block, false otherwise.
  */
@@ -484,7 +791,6 @@ const isNodeBeforeAvailable = ($pos: ResolvedPos): boolean => {
 /**
  * Check if the given position is at the end of a text block.
  *
- * @param doc - The document node.
  * @param $pos - The resolved position in the document.
  * @returns {boolean} True if the position is at the end of a text block, false otherwise.
  */
@@ -496,6 +802,7 @@ const isNodeAfterAvailable = ($pos: ResolvedPos): boolean => {
  * Sets the cursor selection after creating the new document.
  *
  * @param tr - The current transaction.
+ * @param newCursorPos - The new cursor position.
  * @returns {void}
  */
 const paginationUpdateCursorPosition = (tr: Transaction, newCursorPos: Nullable<number>): void => {
@@ -512,11 +819,9 @@ const paginationUpdateCursorPosition = (tr: Transaction, newCursorPos: Nullable<
     if (selection) {
       setSelection(tr, selection);
     } else {
-      // Fallback to a safe selection at the end of the document
       setSelectionAtEndOfDocument(tr);
     }
   } else {
     setSelectionAtEndOfDocument(tr);
   }
-};       
-
+};
